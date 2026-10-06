@@ -1,8 +1,8 @@
 <div align="center">
 
-# CareRelay · ถึงมือหมอ
+# SiamCareNode
 
-**Agentic AI care routing on AWS: it finds the right hospital for a patient, fast, and a human approves every transfer.**
+**Agentic Care Coordination Network**
 
 Built for the **NTT DATA Digital Innovation Challenge 2026**
 
@@ -46,7 +46,7 @@ Built for the **NTT DATA Digital Innovation Challenge 2026**
 
 ## Overview
 
-Finding a hospital that can take a patient still means a lot of phone calls. CareRelay replaces that with an **Amazon Bedrock coordinator agent** that does the following:
+Finding a hospital that can take a patient still means a lot of phone calls. SiamCareNode replaces that with an **Amazon Bedrock coordinator agent** that does the following:
 
 1. **Plans** the search from a goal rather than a fixed script.
 2. **Retrieves** hospital capabilities through RAG over each hospital's department documents.
