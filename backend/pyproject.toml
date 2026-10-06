@@ -1,0 +1,37 @@
+[project]
+name = "siamcare"
+version = "0.1.0"
+description = "SiamCareNode hospital discovery foundation"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pydantic>=2.10,<3",
+]
+
+[project.scripts]
+siamcare = "siamcare.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/siamcare"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"data/mock/hospitals.json" = "siamcare/data/mock/hospitals.json"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.10",
+]

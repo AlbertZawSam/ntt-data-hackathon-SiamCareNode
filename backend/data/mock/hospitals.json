@@ -1,0 +1,10 @@
+[
+  {"hospital_id":"H01","name_en":"Synthetic Lotus Dawn Hospital","name_th":"โรงพยาบาลบัวอรุณจำลอง","specialties":["neurology","cardiology"],"total_beds":120,"free_beds":4,"capacity_updated_at":"2026-10-01T09:00:00+07:00"},
+  {"hospital_id":"H02","name_en":"Synthetic Moon River Hospital","name_th":"โรงพยาบาลสายน้ำจันทร์จำลอง","specialties":["neurology"],"total_beds":80,"free_beds":0,"capacity_updated_at":"2026-10-01T09:05:00+07:00"},
+  {"hospital_id":"H03","name_en":"Synthetic Golden Leaf Hospital","name_th":"โรงพยาบาลใบไม้ทองจำลอง","specialties":["pediatrics","obstetrics"],"total_beds":60,"free_beds":8,"capacity_updated_at":"2026-10-01T09:10:00+07:00"},
+  {"hospital_id":"H04","name_en":"Synthetic Cloud Garden Hospital","name_th":"โรงพยาบาลสวนเมฆจำลอง","specialties":["orthopedics"],"total_beds":40,"free_beds":1,"capacity_updated_at":"2026-10-01T09:15:00+07:00"},
+  {"hospital_id":"H05","name_en":"Synthetic Blue Jasmine Hospital","name_th":"โรงพยาบาลมะลิสีฟ้าจำลอง","specialties":["cardiology","internal medicine"],"total_beds":100,"free_beds":0,"capacity_updated_at":"2026-10-01T09:20:00+07:00"},
+  {"hospital_id":"H06","name_en":"Synthetic Rainbow Grove Hospital","name_th":"โรงพยาบาลสวนสายรุ้งจำลอง","specialties":["neurology","orthopedics"],"total_beds":90,"free_beds":1,"capacity_updated_at":"2026-10-01T09:25:00+07:00"},
+  {"hospital_id":"H07","name_en":"Synthetic Silver Orchid Hospital","name_th":"โรงพยาบาลกล้วยไม้เงินจำลอง","specialties":["pediatrics","dermatology"],"total_beds":30,"free_beds":3,"capacity_updated_at":"2026-10-01T09:30:00+07:00"},
+  {"hospital_id":"H08","name_en":"Synthetic Starlight Meadow Hospital","name_th":"โรงพยาบาลทุ่งแสงดาวจำลอง","specialties":["internal medicine"],"total_beds":0,"free_beds":0,"capacity_updated_at":"2026-10-01T09:35:00+07:00"}
+]

@@ -19,6 +19,11 @@ Built for the **NTT DATA Digital Innovation Challenge 2026**
 > **Design principle:** the agent coordinates; humans and fixed rules decide.
 > The model never handles emergency screening or transfer approval.
 
+**Implemented now:** [Phase 1 Python backend](backend/README.md) provides local
+hospital discovery and capacity filtering using synthetic JSON data. Run it with
+uv; no AWS account is required. The broader architecture and deployment steps below
+describe the planned platform.
+
 ---
 
 ## Table of contents
