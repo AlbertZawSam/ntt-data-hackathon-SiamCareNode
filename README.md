@@ -1,597 +1,387 @@
-<div align="center">
-
 # SiamCareNode
 
-**Agentic Care Coordination Network**
+A Python backend for hospital discovery and a simulated referral workflow, built
+for the NTT DATA Digital Innovation Challenge 2026.
 
-Built for the **NTT DATA Digital Innovation Challenge 2026**
+## Current backend
 
-![AWS](https://img.shields.io/badge/AWS-Serverless-FF9900?logo=amazonwebservices&logoColor=white)
-![Amazon Bedrock](https://img.shields.io/badge/Amazon%20Bedrock-Agents%20%2B%20RAG-232F3E)
-![Flutter](https://img.shields.io/badge/Flutter-Android%20%7C%20iOS%20%7C%20Web-02569B?logo=flutter&logoColor=white)
-![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
-![CDK](https://img.shields.io/badge/AWS%20CDK-TypeScript-3178C6?logo=typescript&logoColor=white)
-![Languages](https://img.shields.io/badge/UI-English%20%7C%20ไทย-4CAF50)
-![License](https://img.shields.io/badge/license-MIT-blue)
+- Discover eight fictional hospitals by ID, specialty, and recorded free beds.
+- Create referrals, send hospital requests, accept or decline requests, submit for
+  physician review, and approve or reject referrals.
+- Persist referrals, requests, and ordered event history in SQLite through `.env`
+  configuration. Hospital seed data is loaded from JSON.
+- Run through the `siamcare` CLI. There is no HTTP API or frontend yet.
 
-</div>
+All examples use synthetic data. Hospital responses and actor roles are simulated;
+no hospital is contacted, no bed is reserved, and no transport is dispatched.
+Actor flags are not authentication. Use synthetic patient references only.
 
-> **Design principle:** the agent coordinates; humans and fixed rules decide.
-> The model never handles emergency screening or transfer approval.
+## Team setup
 
-**Implemented now:** [Phase 1 Python backend](backend/README.md) provides local
-hospital discovery and capacity filtering using synthetic JSON data. Run it with
-uv; no AWS account is required. The broader architecture and deployment steps below
-describe the planned platform.
+Prerequisites: Git and [uv](https://docs.astral.sh/uv/getting-started/installation/).
+Python 3.12 is installed by the commands below. DataGrip is optional; SQLite does
+not require Docker or a database server. Commands use Bash or zsh.
 
----
+After this work is pushed, teammates can clone the `bambi` branch:
 
-## Table of contents
-
-- [Overview](#overview)
-- [How it works](#how-it-works)
-- [Roles](#roles)
-- [Functional modules](#functional-modules)
-- [Key workflows](#key-workflows)
-- [AWS architecture](#aws-architecture)
-- [Agent design](#agent-design)
-- [Mobile app (Flutter)](#mobile-app-flutter)
-- [Data model](#data-model)
-- [API](#api)
-- [Security, privacy and responsible AI](#security-privacy-and-responsible-ai)
-- [Repository structure](#repository-structure)
-- [Getting started](#getting-started)
-- [Testing](#testing)
-- [Demo scenarios](#demo-scenarios)
-- [Cost efficiency](#cost-efficiency)
-- [Scope and constraints](#scope-and-constraints)
-- [License](#license)
-
----
-
-## Overview
-
-Finding a hospital that can take a patient still means a lot of phone calls. SiamCareNode replaces that with an **Amazon Bedrock coordinator agent** that does the following:
-
-1. **Plans** the search from a goal rather than a fixed script.
-2. **Retrieves** hospital capabilities through RAG over each hospital's department documents.
-3. **Calls tools** for live bed capacity and travel time.
-4. **Contacts hospitals**, in parallel when the case is time-critical.
-5. **Re-plans** when a hospital declines.
-6. **Recommends** one hospital, with reasons and sources, for a human to approve.
-
-Two entry paths share one engine:
-
-| Path | Who | Flow |
-|---|---|---|
-| 🏥 **Clinician referral** (hospital to hospital) | Doctors, nurses, referral coordinators | The agent contacts 3–5 hospitals in parallel for time-critical cases, or the preferred hospital for routine ones. Staff approve the transfer. |
-| 🧑 **Patient search** | Public users, caregivers | The patient describes their need in English or Thai. A rule-based emergency screen runs first. The agent then ranks suitable hospitals with trust labels, and the patient can send a visit request for the hospital to confirm. |
-
-Everyone uses **one Flutter app** (Android, iOS, web), and each role gets its own view.
-
----
-
-## How it works
-
-```mermaid
-flowchart LR
-    A[Patient / Clinician<br/>Flutter app] --> B{Safety gate<br/>rule-based EN/TH}
-    B -- red flag --> E[🚨 Emergency screen<br/>call 1669]
-    B -- safe --> C[Bedrock agent<br/>plan → RAG → tools]
-    C --> D[(Capacity + trust labels<br/>travel time)]
-    C --> H[Hospitals<br/>accept / decline]
-    H -- decline --> C
-    C --> R[Recommendation<br/>with sources]
-    R --> P{👩‍⚕️ Approving physician}
-    P -- approve --> T[Transfer workflow<br/>bed · dispatch · notify]
-    P -- reject --> A
+```bash
+git clone --branch bambi https://github.com/AlbertZawSam/ntt-data-hackathon-SiamCareNode.git
+cd ntt-data-hackathon-SiamCareNode/backend
+uv python install 3.12
+uv sync --locked
+cp -n .env.example .env
+uv run siamcare --help
 ```
 
----
+For an existing checkout, switch to `bambi` and pull its latest changes before
+running the setup commands from `backend/`. Keep your own uncommitted work safe
+before switching branches. Run all commands below from `backend/`.
+`cp -n` preserves an existing `.env`; on a new checkout it creates one from the
+shared example. Each teammate has their own local database.
 
-## Roles
+## Automated verification
 
-Each of the 13 human roles maps to one **Amazon Cognito group**, and API Gateway authorizers check access on every endpoint.
-**Only the Approving physician can approve a transfer. No system role can.**
+```bash
+uv run pytest -q
+uv run ruff check .
+uv run ruff format --check .
+uv build
+```
 
-<details>
-<summary><b>Human roles</b> (click to expand)</summary>
+Expected: 117 tests pass, lint and formatting checks pass, and a wheel plus source
+archive are created in `dist/`. Tests use isolated temporary databases and do not
+modify the database configured in `.env`.
 
-| Role | Can do | Cannot do | Cognito group |
+| Tests | What they verify |
+|---|---|
+| `test_hospital_repository.py`, `test_hospital_service.py`, `test_cli.py` | JSON validation, hospital discovery, filtering, and CLI errors |
+| `test_config.py` | `.env` paths, environment overrides, and explicit database selection |
+| `test_referral_service.py` | Approval, decline/retry, rejection, roles, hospital scope, reasons, and invalid transitions |
+| `test_referral_repository.py` | Persistence, repeat initialization, concurrent writes, constraints, and rollback |
+| `test_referral_cli.py` | Workflow across separate processes, argument validation, and database errors |
+
+## SQLite configuration and DataGrip
+
+Set the database file in `backend/.env`:
+
+```dotenv
+SIAMCARE_DATABASE_PATH=./data/siamcare.sqlite3
+```
+
+To use an existing SQLite database, replace this value with its absolute file path.
+A DataGrip project directory such as `~/DataGripProjects/default` is an IDE settings
+folder, not a database file. Use the filename shown in the data source's **File**
+setting. Both the application and DataGrip must use the same file.
+
+Initialize the application's tables from `backend/`:
+
+```bash
+uv run siamcare referrals list
+```
+
+This creates missing tables without deleting existing records. In DataGrip, open
+an existing SQLite data source's settings (or add one), set **File** to the absolute
+path of `backend/data/siamcare.sqlite3` in your checkout, test the connection, and
+apply. If you configured a different file in `.env`, select that file instead.
+The JDBC URL has the form `jdbc:sqlite:/absolute/path/to/database.sqlite3`.
+Refresh the database explorer and expand `main` to see `referrals`,
+`hospital_requests`, and `referral_events`. SQLite needs no host, port, credentials,
+or running database server. Hospital seeds currently remain in JSON.
+
+Configuration precedence is `--database PATH`, then the exported
+`SIAMCARE_DATABASE_PATH` environment variable, then `backend/.env`. Relative paths
+in configuration resolve from `backend/` in a source checkout. Installed packages
+read `.env` and resolve configured relative paths from the working directory.
+If no database path is configured, the fallback is `~/.siamcare/referrals.sqlite3`.
+Existing database files are not moved automatically. `.env` and database files
+are ignored by Git; `.env.example` documents the shared setup.
+
+## Manual test: hospital discovery
+
+```bash
+uv run siamcare hospitals list
+uv run siamcare hospitals get H01
+uv run siamcare hospitals search --specialty neurology
+uv run siamcare hospitals search --specialty ' Neurology ' --min-free-beds 1
+uv run siamcare --dataset data/mock/hospitals.json hospitals get H01
+```
+
+Specialties are trimmed and case-folded, then matched exactly: no synonyms,
+substring matching, diagnosis inference, or clinical suitability assessment.
+The search with `--min-free-beds 1` returns `H01` and `H06`. Without the bed filter, `H02` is also
+returned despite having zero free beds. A minimum of zero includes zero-bed
+hospitals. Blank or unmatched specialty searches return `[]`. IDs are case-sensitive;
+hospital results sort by ID. Bed counts are hospital-wide, not specialty-specific.
+
+## Manual test: approval workflow
+
+The following Bash/zsh commands use the persistent database configured above.
+Records remain available across commands and can be inspected in DataGrip.
+
+```bash
+referral_id=$(uv run siamcare referrals create \
+  --patient SYN-001 --specialty neurology --urgency routine \
+  --actor demo-clinician --role clinician \
+  | uv run python -c 'import json,sys; print(json.load(sys.stdin)["referral_id"])')
+echo "$referral_id"
+
+uv run siamcare referrals list
+uv run siamcare referrals get "$referral_id"
+uv run siamcare referrals hospitals "$referral_id"
+
+request_id=$(uv run siamcare requests send "$referral_id" --hospital H01 \
+  --actor demo-clinician --role clinician \
+  | uv run python -c 'import json,sys; print(json.load(sys.stdin)["request_id"])')
+echo "$request_id"
+
+uv run siamcare requests list --referral "$referral_id"
+uv run siamcare requests list --hospital H01
+uv run siamcare requests accept "$request_id" \
+  --actor demo-h01-staff --role hospital_staff --actor-hospital H01
+uv run siamcare referrals submit-review "$referral_id" \
+  --actor demo-clinician --role clinician
+uv run siamcare referrals approve "$referral_id" \
+  --actor demo-physician --role approver
+uv run siamcare referrals get "$referral_id"
+uv run siamcare referrals history "$referral_id"
+```
+
+The final status is `approved`, with five events: `created`, `request_sent`,
+`request_accepted`, `review_submitted`, `approved`. IDs are generated UUIDs and
+returned in JSON. The shell variables above extract those IDs; alternatively copy
+`referral_id` and `request_id` from command output into subsequent commands.
+
+## Manual test: decline, retry, and rejection
+
+Run this in the same terminal. It creates a second referral:
+
+```bash
+referral_id=$(uv run siamcare referrals create \
+  --patient SYN-002 --specialty neurology --urgency time-critical \
+  --actor demo-clinician --role clinician \
+  | uv run python -c 'import json,sys; print(json.load(sys.stdin)["referral_id"])')
+request_id=$(uv run siamcare requests send "$referral_id" --hospital H01 \
+  --actor demo-clinician --role clinician \
+  | uv run python -c 'import json,sys; print(json.load(sys.stdin)["request_id"])')
+uv run siamcare requests decline "$request_id" --reason 'Synthetic ward unavailable' \
+  --actor demo-h01-staff --role hospital_staff --actor-hospital H01
+
+request_id=$(uv run siamcare requests send "$referral_id" --hospital H06 \
+  --actor demo-clinician --role clinician \
+  | uv run python -c 'import json,sys; print(json.load(sys.stdin)["request_id"])')
+uv run siamcare requests accept "$request_id" \
+  --actor demo-h06-staff --role hospital_staff --actor-hospital H06
+uv run siamcare referrals submit-review "$referral_id" \
+  --actor demo-clinician --role clinician
+uv run siamcare referrals reject "$referral_id" --reason 'Synthetic review rejected' \
+  --actor demo-physician --role approver
+uv run siamcare requests list --referral "$referral_id"
+uv run siamcare referrals history "$referral_id"
+```
+
+The first request stays `declined`; the second becomes `cancelled`. The referral is
+terminally `rejected`. The hospital's original response reason/time is retained;
+the physician's rejection reason is stored in the final event.
+
+## Manual test: expected failures
+
+After the rejection workflow above, these commands should fail without changing
+its records. Run them individually; `echo $?` prints the preceding exit code.
+
+```bash
+uv run siamcare referrals get DOES-NOT-EXIST
+echo $?  # 1: referral not found
+
+uv run siamcare referrals approve "$referral_id" \
+  --actor demo-physician --role approver
+echo $?  # 2: a rejected referral cannot be approved
+
+uv run siamcare requests accept "$request_id" \
+  --actor demo-h01-staff --role hospital_staff --actor-hospital H01
+echo $?  # 2: this request belongs to H06, not H01
+
+uv run siamcare referrals history "$referral_id"
+```
+
+The rejected referral still has seven events. Automated tests additionally cover
+self-review, missing reasons, wrong roles, zero-bed hospitals, duplicate responses,
+and concurrent requests.
+
+## Inspect results in DataGrip
+
+Refresh the SQLite data source after running the workflows. Open a query console
+for that connection and run:
+
+```sql
+SELECT referral_id, patient_reference, status, version
+FROM referrals ORDER BY created_at;
+
+SELECT request_id, referral_id, hospital_id, status, response_reason
+FROM hospital_requests ORDER BY created_at;
+
+SELECT referral_id, version, action, actor_id, timestamp
+FROM referral_events ORDER BY referral_id, version;
+
+PRAGMA integrity_check;
+PRAGMA foreign_key_check;
+```
+
+On a fresh database, the two workflows produce two referrals (`approved` and
+`rejected`), three requests (`accepted`, `declined`, and `cancelled`), and twelve
+events. Repeating the walkthrough creates additional records with new UUIDs.
+Integrity should return `ok`; the foreign-key check should return no rows.
+
+Discover arguments with `uv run siamcare referrals --help`,
+`uv run siamcare requests --help`, or a command's `--help`. Successful commands
+emit JSON on stdout and simulation/snapshot reminders on stderr. Exit codes:
+`0` success (including empty lists), `1` unknown ID, `2` invalid input, forbidden
+actor, invalid transition, concurrency conflict, or persistence failure.
+
+## State model and rules
+
+Referral status is separate from each hospital request's status:
+
+| Action | Referral before → after | Request change | Demo role |
 |---|---|---|---|
-| Guest patient | Describe need, see emergency screen, view ranked hospitals, get directions | Send visit requests, see history | none (rate-limited identity pool) |
-| Registered patient | All guest actions, send visit requests, see own status | See others' data, contact hospitals through the agent | `patients` |
-| Caregiver | Act for a linked patient with recorded consent | Act for unlinked patients | `patients` (caregiver flag) |
-| Referring clinician | Create referrals, start the agent, view trace, reject with reason | Approve own referral | `clinicians` |
-| Referral coordinator | View regional referrals, re-run agent, reassign, escalate | Approve transfers | `coordinators` |
-| **Approving physician** | **Approve / reject recommendations**, review uncertain data | Edit audit records | `approvers` |
-| Receiving hospital staff | Update capacity, accept / decline requests | See other hospitals' referrals | `hospital_staff` (scoped to `hospital_id`) |
-| Hospital admin | Manage profile, staff, capability documents | Change other hospitals' data | `hospital_admins` |
-| Transport dispatcher | Receive approved transfers, confirm pickup and arrival | See search or referral history | `dispatch` |
-| Clinical safety reviewer | Edit red-flag rules (EN/TH), disclaimers, guardrails (versioned) | Deploy without a second reviewer | `safety_reviewers` |
-| Compliance auditor | Read audit trail and access logs, export | Change any data | `auditors` (read-only) |
-| Platform administrator | Environments, alarms, budgets, user provisioning | Read patient-identifying fields in prod | `platform_admins` |
-| Demo operator *(demo only)* | Set mock hospital behavior, reset data, toggle backup mode | Exists only in the demo stage | `demo_operators` |
+| Create | none → `open` | none | clinician |
+| Send | `open` → `awaiting_hospital` | new `pending` request | clinician |
+| Accept | `awaiting_hospital` → `hospital_accepted` | `pending` → `accepted` | hospital_staff |
+| Decline | `awaiting_hospital` → `open` | `pending` → `declined` | hospital_staff |
+| Submit review | `hospital_accepted` → `awaiting_review` | stays `accepted` | clinician |
+| Approve | `awaiting_review` → `approved` | stays `accepted` | approver |
+| Reject | `awaiting_review` → `rejected` | `accepted` → `cancelled` | approver |
 
-</details>
+- Urgency must be explicitly `routine` or `time-critical`; it is stored without
+  inference, ranking, deadlines, or different execution behavior in this phase.
+- Only one pending or accepted request is permitted per referral. After a decline,
+  the selection clears and another request can be sent. Previous requests remain.
+- Sending verifies that the referral and hospital exist, the specialty matches,
+  and the recorded free-bed count is at least one, using the Phase 1 service.
+- Only a pending request can receive a first response. The responder must have
+  `hospital_staff` role and the matching `--actor-hospital` scope.
+- Only an accepted selected request can be submitted for review. Any simulated
+  clinician can send or submit; the creator remains the referring clinician.
+- Approve/reject requires `awaiting_review`, an `approver` role, and an actor ID
+  different from the referring clinician. Both decisions are terminal here.
+- Decline and rejection require nonblank reasons. Acceptance and approval may
+  include optional reasons. There is no independent cancellation command.
+- Repeated/conflicting transitions fail without new events or partial state.
+  Each create command intentionally creates a new referral; there is no remote
+  request idempotency key or retry system in this local CLI.
 
-<details>
-<summary><b>System roles</b> (click to expand)</summary>
+## Data, paths, and reset
 
-| Role | What it does | Runs on | Limits |
-|---|---|---|---|
-| Safety gate | Rule-based red-flag screen (EN/TH) on every patient message, before any model call | Lambda | The agent cannot bypass it |
-| Coordinator agent | Plans, retrieves, calls tools, re-plans, recommends | Bedrock Agents (stronger model) | Has no tool to approve transfers or classify emergencies |
-| Patient assistant agent | Understands the need, searches, explains in the user's language | Bedrock Agents (small fast model) | Read-only tools |
-| Trust check service | Labels capacity data `fresh` / `stale` / `conflict` | Lambda + EventBridge Scheduler | Deterministic; agents can read labels but not override them |
-| Fallback ranker | Rule-based ranking if the agent times out or fails | Lambda | Marked as fallback in the trace |
-| Notification service | SMS, email and push | SNS, SES | EN/TH templates only |
-| Capacity simulator *(demo only)* | Changes synthetic bed counts and creates stale data | Lambda + EventBridge Scheduler | Off outside the demo stage |
+Global options go **before** `hospitals`, `referrals`, or `requests`:
 
-</details>
+- `--dataset PATH`: default `backend/data/mock/hospitals.json` in a source checkout,
+  located relative to the package, independently of the working directory. Wheels
+  bundle the same fixture. A supplied relative path uses the current directory.
+- `--database PATH`: overrides the environment and `.env` database configuration.
+  Parent directories are created. A path supplied through this CLI option resolves
+  from the current directory; `~` is expanded.
+- Hospital-only commands do not initialize SQLite. Referral/request commands
+  initialize missing tables and indexes without clearing existing data.
 
----
-
-## Functional modules
-
-| # | Module | Key capabilities | AWS services |
-|---|---|---|---|
-| 1 | Identity and access | Sign-up/in, guest access, role groups, hospital scoping, caregiver consent | Cognito, API Gateway authorizers |
-| 2 | Patient intake and safety screen | EN/TH intake, language detection, red-flag screen, 1669 emergency screen | Lambda, Bedrock Guardrails, Amazon Translate |
-| 3 | Hospital discovery | Need classification, RAG, metadata filtering, travel time, ranking | Bedrock Knowledge Bases, Amazon Location Service, DynamoDB |
-| 4 | Referral orchestration | Goal-driven planning, parallel requests, re-planning, sourced recommendation | Bedrock Agents, Lambda action groups, Step Functions |
-| 5 | Hospital response | Accept / decline with reasons, response timeouts | API Gateway, Lambda, Step Functions task tokens |
-| 6 | Capacity management | Bed updates, specialty availability, validation, freshness | DynamoDB, Lambda |
-| 7 | Trust and data quality | Fresh / stale / conflict labels, conflict detection | Lambda, EventBridge Scheduler, DynamoDB Streams |
-| 8 | Human review and approval | Review queue, approve / reject with reason, reassign | Step Functions, DynamoDB |
-| 9 | Transfer coordination | Bed reservation, dispatch, receiving team notice, summary | Step Functions, Lambda, SNS |
-| 10 | Notifications | SMS, email and push in EN/TH | SNS, SES |
-| 11 | Localization | Flutter ARB strings, agent reply language, Thai rules, bundled Thai font | Flutter, Amplify Hosting |
-| 12 | Audit and compliance | Immutable log of agent steps, safety decisions and human actions | DynamoDB, CloudTrail, CloudWatch Logs, S3 |
-| 13 | Administration and content | Hospital profiles, staff, capability docs, safety rule versions | S3, Bedrock KB sync, DynamoDB |
-| 14 | Metrics and demo control | Time to placement, contacts per placement, cost per referral, mock behavior | CloudWatch, AWS Budgets, DynamoDB |
-
-Modules 1–11 are the product. Modules 12–14 support operations and the demo.
-
----
-
-## Key workflows
-
-### 1. Clinician referral (the agentic core)
-
-```mermaid
-sequenceDiagram
-    actor C as Clinician
-    participant A as Coordinator agent
-    participant H as Hospitals
-    actor P as Approving physician
-    participant W as Transfer workflow
-    C->>A: Create referral + run agent
-    A->>A: Plan · RAG · capacity · travel time
-    A->>H: Send requests (3–5 in parallel if time-critical)
-    H-->>A: Decline (e.g. CT down)
-    A->>A: Re-plan (max 3 rounds / 5 hospitals)
-    H-->>A: Accept
-    A->>P: Recommendation + reasons + sources
-    alt Stale / conflicting data
-        P->>P: Human review of uncertain data
-    end
-    P->>W: Approve → bed · dispatch · notify
-    P-->>C: or Reject (reason logged)
-```
-
-### 2. Patient search
-
-1. The patient or caregiver types their need in **English or Thai** (as a guest or signed in).
-2. The **safety gate** checks red-flag rules. A match stops the flow and shows the **1669 emergency screen**, and no model is called.
-3. The **patient assistant agent** detects the language, classifies the need and retrieves capable hospitals.
-4. It checks capacity, trust labels and travel time.
-5. It shows ranked hospitals with trust labels, in the patient's language.
-6. *Optional:* a signed-in patient sends a visit request, the hospital accepts or declines, and the patient gets an SMS.
-
-### 3. Hospital capacity and trust
-
-1. Staff update free beds. In the demo, the simulator can do this instead.
-2. The update is validated (between 0 and total beds), saved as a timestamped snapshot and audited.
-3. **Every 5 minutes** the trust check labels each hospital:
-   - 🟢 **fresh**: updated in the last 30 minutes or less
-   - 🟡 **stale**: older than that
-   - 🔴 **conflict**: free beds are shown but recent requests were declined
-4. Stale or conflicting data forces **human review** in referrals and shows a **call-ahead warning** to patients.
-
-### 4. Transfer
-
-Approval resumes the Step Functions workflow. The system reserves the bed, notifies dispatch and the receiving ward, and shares the referral summary. Dispatch then confirms pickup and arrival. Every step is audited.
-
----
-
-## AWS architecture
-
-All traffic comes in through one front door. Patient messages pass the rule-based safety gate before any model call. Both agents share one tool library, and every transfer stops at a human approver.
-
-```mermaid
-flowchart TB
-    subgraph L1[1 · Client]
-        APP[Flutter app<br/>Android · iOS · Web]
-    end
-    subgraph L2[2 · Front door]
-        COG[Amazon Cognito]
-        WAF[AWS WAF]
-        APIGW[API Gateway<br/>REST + WebSocket]
-    end
-    subgraph L3[3 · Decision layer]
-        SG[Safety gate<br/>Lambda]
-        CA[Coordinator agent<br/>Bedrock]
-        PA[Patient assistant agent<br/>Bedrock]
-        GR[Bedrock Guardrails]
-    end
-    subgraph L4[4 · Shared tools]
-        TOOLS[Lambda action groups]
-        KB[Bedrock Knowledge Bases<br/>S3 Vectors]
-        LOC[Amazon Location Service]
-        DDB[(DynamoDB)]
-    end
-    subgraph L5[5 · Workflow + human approval]
-        SF[Step Functions]
-        HUM[👩‍⚕️ Approver]
-        NOTIFY[SNS · SES]
-    end
-    subgraph L6[6 · Audit and cost]
-        AUD[CloudWatch · X-Ray · CloudTrail<br/>S3 export · AWS Budgets]
-    end
-    APP --> COG
-    APP --> WAF --> APIGW
-    APIGW --> SG --> PA
-    APIGW --> CA
-    CA & PA --- GR
-    CA & PA --> TOOLS
-    TOOLS --> KB & LOC & DDB
-    CA --> SF --> HUM --> SF --> NOTIFY
-    SF & TOOLS & APIGW -.-> AUD
-```
-
-<details>
-<summary><b>Full AWS service inventory</b> (click to expand)</summary>
-
-| Need | AWS service | Use |
-|---|---|---|
-| Team access | IAM Identity Center | One sign-in per teammate, MFA |
-| App sign-in and roles | Amazon Cognito | User pool with 13 groups; identity pool for guests |
-| Flutter auth | AWS Amplify Flutter (Auth) | Sign-in, token refresh, guest identity |
-| API | Amazon API Gateway | REST API and WebSocket API for the live agent trace |
-| API protection | AWS WAF | Managed rules, rate limits |
-| Business logic | AWS Lambda (Python 3.12) | API handlers, agent tools, trust check, fallback ranker |
-| AI agents | Amazon Bedrock Agents | Coordinator and patient assistant |
-| Models | Amazon Bedrock (Claude, multilingual embeddings) | Planning, EN/TH replies, RAG embeddings |
-| RAG | Bedrock Knowledge Bases | Custom-chunked department docs |
-| Vector store | Amazon S3 Vectors *(or Aurora Serverless pgvector)* | Low idle cost |
-| AI safety | Bedrock Guardrails | Denied topics, PII masking, content filters |
-| Thai safety backup | Amazon Translate | Second guardrail check on translated input |
-| Workflow | AWS Step Functions | Referral, approval, timeouts, transfer |
-| Scheduling | EventBridge Scheduler | Trust check every 5 min; capacity simulator |
-| Operational data | Amazon DynamoDB | 8 on-demand tables with streams and TTL |
-| Files | Amazon S3 | KB docs, audit exports, APK downloads |
-| Encryption | AWS KMS | DynamoDB, S3, logs |
-| Config and secrets | SSM Parameter Store, Secrets Manager | Stage settings, server-side secrets |
-| Maps and ETAs | Amazon Location Service | Route matrix, map tiles |
-| SMS / email / push | Amazon SNS (+ FCM/APNs), Amazon SES | EN/TH notifications |
-| Web hosting | AWS Amplify Hosting | Flutter web build |
-| CI/CD | CodePipeline, CodeBuild, CodeConnections | Tests, CDK deploys, APK and web builds |
-| Device testing | AWS Device Farm | Flutter integration tests on real phones |
-| IaC | AWS CDK (TypeScript), CloudFormation | All stacks per stage |
-| Observability | CloudWatch, X-Ray, CloudTrail | Dashboards, tracing, account audit |
-| Cost control | AWS Budgets, Cost Explorer | Monthly alert, cost per referral |
-| Coding assistant | Claude Code on Amazon Bedrock | Used to build the project |
-
-Two things are not on AWS: **TestFlight** (Apple requires it for iOS test builds) and the **Flutter and Dart** libraries. Source code is hosted on GitHub.
-
-</details>
-
----
-
-## Agent design
-
-There are two Bedrock agents. Each gets a **goal, not a script**, and every step is streamed to the app as a trace.
-
-| Agent | Used for | Model |
-|---|---|---|
-| **Coordinator** | Clinician referrals | A stronger Claude model, for multi-step planning and reading free-text hospital replies |
-| **Patient assistant** | Patient search | A small, fast Claude model (e.g. Claude Haiku), for low cost and latency |
-| *Embeddings* | Cross-language RAG | A multilingual model (e.g. Cohere Embed Multilingual), so Thai queries find English docs |
-
-### Tool library (Bedrock action groups, one Lambda each)
-
-| Tool | Output | Coordinator | Patient assistant |
-|---|---|:-:|:-:|
-| `search_capabilities` | Hospitals with cited KB chunks | ✅ | ✅ |
-| `get_capacity` | Free beds, last update, trust label | ✅ | ✅ |
-| `get_travel_times` | Minutes per hospital (Location route matrix) | ✅ | ✅ |
-| `send_referral_request` | Request IDs | ✅ | ❌ |
-| `check_request_status` | Accepted / declined + reason / waiting | ✅ | ❌ |
-| `cancel_request` | Confirmation | ✅ | ❌ |
-| `submit_recommendation` | Puts the case in the approval queue | ✅ | ❌ |
-| `write_audit_note` | Audit entry ID | ✅ | ✅ |
-
-> 🔒 **No tool approves a transfer, overrides a trust label, or decides whether a case is an emergency.**
-
-### Coordinator instructions (summary)
-
-```text
-Goal: find one hospital that has the required capability, has capacity, and accepts.
-1. Retrieve capable hospitals with search_capabilities. Use only hospitals it returns.
-2. Check capacity and travel time. Prefer fresh data; treat stale or conflicting data as uncertain.
-3. Time-critical: request the best 3 to 5 in parallel. Routine: request the preferred hospital first.
-4. When a hospital declines or times out, explain why and re-plan. Stop after 3 rounds or 5 hospitals.
-5. Submit one recommendation with reasons and source IDs. Never approve a transfer.
-6. Reply in the user's language (English or Thai). Never give a diagnosis or treatment advice.
-```
-
-### Guardrails and limits
-
-- **Bedrock Guardrails** on both agents: denied topics (diagnosis, medication dosing, treatment advice), PII masking and harmful content filters. Thai input is also translated and checked in English.
-- **Agent turn timeout:** 20 seconds for time-critical cases. After that, the **fallback ranker** returns a rule-based list.
-- **Hospital response timeout:** 3 minutes for time-critical cases and 30 minutes for routine ones. These are demo values that still need to be confirmed with clinicians.
-
----
-
-## Mobile app (Flutter)
-
-One codebase builds the **Android, iOS and web** apps. The app only talks to AWS through Cognito sign-in, the REST API and the WebSocket trace stream. It holds **no AWS keys**.
-
-| Layer | Responsibility | Packages |
-|---|---|---|
-| Presentation | Screens and widgets per role | Material 3, `go_router` |
-| State | One provider per feature | `flutter_riverpod` |
-| Data | Repositories, JSON ↔ models | `dio`, `freezed`, `json_serializable` |
-| Core services | Auth, trace stream, safety rules, i18n, config | `amplify_flutter`, `amplify_auth_cognito`, `web_socket_channel`, `flutter_localizations` |
-| Platform | Call 1669, settings, fonts | `url_launcher`, `shared_preferences` |
-
-**Highlights**
-
-- **Role-based home:** the app reads the user's Cognito groups from the ID token and opens the right home screen. Users in several groups get a role switcher.
-- **Live agent trace:** a WebSocket streams each step as it happens (plan, RAG, tool call, observation, re-plan, output). If the connection drops, the app reconnects with backoff and catches up from `GET /referrals/{id}/trace`.
-- **Offline safety:** the EN/TH red-flag rules ship inside the app, so the emergency screen and the 1669 button work with **no network**. The server-side gate still makes the final call.
-- **Bilingual:** strings live in `app_en.arb` and `app_th.arb`. The app follows the phone's language, saves the user's toggle choice and bundles a Thai font.
-- **Accessibility:** supports system text size, screen-reader labels, 48 px touch targets, and contrast that works in light and dark mode.
-- **Privacy:** the demo uses preset Bangkok locations. Device GPS sits behind a feature flag.
-
-| Target | Command | Delivered by |
-|---|---|---|
-| Android | `flutter build apk --dart-define-from-file=env/demo.json` | Private S3 bucket, time-limited link |
-| iOS | `flutter build ipa --dart-define-from-file=env/demo.json` | TestFlight |
-| Web | `flutter build web --dart-define-from-file=env/demo.json` | AWS Amplify Hosting |
-
----
-
-## Data model
-
-Operational data is kept in **8 DynamoDB tables** (on-demand). Hospital capability knowledge is kept in **S3 as one Markdown file per hospital department**, indexed by Bedrock Knowledge Bases.
-
-| Table | PK | SK | Notes |
-|---|---|---|---|
-| `Hospitals` | `hospital_id` | — | names EN/TH, lat/lng, specialties, beds, NICU / stroke level; GSI by region |
-| `CapacitySnapshots` | `hospital_id` | `updated_at` | free beds, ICU free, source; **stream → trust check** |
-| `TrustState` | `hospital_id` | — | label (fresh / stale / conflict), reason |
-| `Referrals` | `referral_id` | — | urgency, need, status, recommendation, approver; GSIs by region+status, creator |
-| `HospitalRequests` | `referral_id` | `request_id` | type (referral / visit), status, `task_token`; TTL on `expires_at` |
-| `AgentTraces` | `referral_id` | `step_no` | step type, text, sources, latency |
-| `AuditLog` | `entity_id` | `timestamp#event_id` | actor, action, before/after; exported to S3 daily |
-| `DemoScenarios` | `hospital_id` | — | accept / decline / timeout behavior *(demo only)* |
-
-<details>
-<summary><b>Knowledge base document example</b></summary>
-
-`kb/H03/maternity.md`
-
-```markdown
-# Northbay Women's and Children's: Maternity
-Capabilities: 24/7 obstetric team, operating theatre for caesarean section,
-level III NICU (12 cots).
-Accepts transfers: preterm labour from 24 weeks; high-risk pregnancy.
-Does not accept: adult trauma.
-Transfer contact: maternity charge nurse via referral desk.
-```
-
-`kb/H03/maternity.md.metadata.json`
+The hospital dataset is a UTF-8 JSON array. Example record:
 
 ```json
 {
-  "metadataAttributes": {
-    "hospital_id": "H03",
-    "specialty": "maternity",
-    "nicu_level": 3,
-    "language": "en",
-    "synthetic": true
-  }
+  "hospital_id": "H01",
+  "name_en": "Synthetic Lotus Dawn Hospital",
+  "name_th": "โรงพยาบาลบัวอรุณจำลอง",
+  "specialties": ["neurology", "cardiology"],
+  "total_beds": 120,
+  "free_beds": 4,
+  "capacity_updated_at": "2026-10-01T09:00:00+07:00"
 }
 ```
 
-A custom chunking Lambda splits documents on department headings, so each chunk is self-contained and Thai text is never cut mid-word.
+Nonblank fields, timezone-aware timestamps, strict nonnegative integer bed counts,
+and `free_beds <= total_beds` are validated. Duplicate IDs, unknown fields, malformed
+records, and unreadable files are rejected with useful errors. No records are
+silently skipped. Use the same dataset across a referral's lifetime: historical
+hospital IDs are preserved even if a later seed file changes.
 
-</details>
+SQLite stores referrals, hospital requests, and events with UUIDs and UTC timestamps.
+Events record the action, demo actor/role, transition details, and referral version;
+ordering by version remains deterministic even for equal timestamps. Referential
+constraints link requests, selections, and events. Hospital existence is checked
+by the service because hospital seeds remain in JSON, outside SQLite.
 
----
+The walkthrough writes to your configured database and preserves referral history.
+To start a separate experiment, use `--database /path/to/experiment.sqlite3` before
+its command group. To reset a database intentionally, close application and DataGrip
+connections, back up the file, and delete only that selected database file. The next
+referral/request command recreates its schema. Database files and SQLite sidecars,
+virtual environments, caches, build outputs, `.env` files, and private key files
+are ignored by Git.
 
-## API
-
-All apps use one REST API (`/v1`) on API Gateway. Each route has a Cognito authorizer, and Lambda enforces hospital scoping. Agent traces stream over a **WebSocket API**.
-
-| Method | Path | Purpose | Allowed roles |
-|---|---|---|---|
-| `POST` | `/patient/search` | Safety screen, then agent search | Guest, patients, caregivers |
-| `POST` | `/patient/visits` | Send a visit request | Patients, caregivers |
-| `GET` | `/patient/visits/{id}` | Visit status | Owner |
-| `POST` | `/referrals` | Create a referral | Clinicians, coordinators |
-| `POST` | `/referrals/{id}/run` | Start coordinator agent | Clinicians, coordinators |
-| `GET` | `/referrals/{id}` | Referral, recommendation, trust labels | Creator, coordinators, approvers |
-| `GET` | `/referrals/{id}/trace` | Agent trace steps | Creator, coordinators, approvers, auditors |
-| `POST` | `/referrals/{id}/approve` | Approve and start the transfer | **Approvers** |
-| `POST` | `/referrals/{id}/reject` | Reject with a required reason | Approvers, clinicians |
-| `POST` | `/referrals/{id}/reassign` | Reassign | Coordinators |
-| `GET` | `/hospital/requests` | Incoming requests for own hospital | Hospital staff |
-| `POST` | `/hospital/requests/{id}/respond` | Accept / decline (resumes the task token) | Hospital staff |
-| `PUT` | `/hospital/capacity` | Update free beds | Hospital staff, admins |
-| `PUT` | `/hospital/profile` | Edit profile, upload capability docs | Hospital admins |
-| `POST` | `/dispatch/{transferId}/status` | Confirm pickup / arrival | Dispatch |
-| `GET` | `/audit` | Query audit log | Auditors |
-| `PUT` | `/admin/safety-rules` | Propose a red-flag rule version (needs second approval) | Safety reviewers |
-| `PUT` | `/demo/scenarios/{hospitalId}` | Set mock hospital behavior | Demo operator |
-| `POST` | `/demo/reset` | Reset synthetic data | Demo operator |
-
-Errors return a code and a message in the caller's language, with no internal details. **Every write creates an `AuditLog` entry.**
-
----
-
-## Security, privacy and responsible AI
-
-| Area | Control |
-|---|---|
-| **Human approval** | A transfer starts only after an approver acts. Uncertain data forces human review. |
-| **Safe boundaries** | A rule-based emergency screen runs before the agent. The agent has no approve or emergency tools. |
-| **Guardrails** | Denied topics, PII masking, content filters, plus a backup check on Thai input via translation |
-| **Escalation** | 1669 emergency screen; human review for stale or conflicting data; fallback ranker on agent timeout |
-| **Disclaimers** | Shown on every patient screen in EN/TH and reviewed by a Thai-speaking clinician |
-| **Audit trail** | Every agent step, safety decision and human action is logged and exported daily |
-| **Privacy** | Synthetic data only, minimum fields per referral, preset locations instead of GPS, PDPA review before any real use |
-| **Encryption** | KMS at rest, TLS in transit |
-| **Least privilege** | One IAM role per Lambda, scoped to its own tables and actions |
-| **Abuse protection** | Rate limits on guest search, WAF managed rules |
-| **Fairness** | Ranking uses only capability, capacity, data reliability and travel time, never insurance or ability to pay |
-| **Change control** | Safety rule changes need a second reviewer and are versioned |
-
----
-
-## Repository structure
-
-This is the planned layout, a monorepo with four parts:
+## Files and responsibilities
 
 ```text
-.
-├── README.md
-├── CLAUDE.md                 # rules for Claude Code sessions
-├── buildspecs/               # CodeBuild: ci.yml, deploy.yml
-├── docs/                     # architecture, roles, api, demo script
-├── infra/                    # AWS CDK (TypeScript)
-│   ├── bin/carerelay.ts
-│   ├── config/               # dev.json, demo.json, prod.json
-│   └── lib/                  # auth, data, knowledge, agent, api, workflow,
-│                             # location, notify, observability, hosting,
-│                             # pipeline, distribution, demo stacks
-├── backend/                  # Python 3.12 Lambdas
-│   ├── shared/               # auth, audit, i18n, trust, ddb, errors
-│   ├── functions/            # safety_gate, patient_search, referrals, approvals,
-│   │                         # capacity, trust_check, fallback_ranker, transfer, ...
-│   ├── agent_tools/          # one folder per tool: handler.py + openapi.yaml
-│   ├── agents/               # coordinator/, patient_assistant/, guardrails/
-│   ├── workflows/            # referral / visit / transfer .asl.json
-│   └── demo/                 # mock_hospital_api, capacity_simulator, scenario_control
-├── mobile/                   # Flutter app (Android, iOS, web)
-│   ├── assets/               # fonts (Noto Sans Thai), safety red-flag rules
-│   └── lib/
-│       ├── core/             # api, auth, router, safety, theme
-│       ├── models/           # freezed models
-│       ├── widgets/          # trace_line, hospital_card, trust_badge, ...
-│       └── features/         # patient, clinician, coordinator, approver,
-│                             # hospital, dispatch, safety_review, audit, admin, demo
-├── data/                     # synthetic data generator, 20 hospitals, KB docs, scenarios
-├── tests/                    # integration, agent_evals, safety, e2e (Device Farm)
-└── scripts/                  # deploy, seed-demo, reset-demo, export-outputs, ...
+ntt-data-hackathon-SiamCareNode/
+├── README.md                     # This setup and testing guide
+├── LICENSE
+├── .gitignore
+└── backend/
+    ├── .env.example              # Shared database configuration template
+    ├── .python-version
+    ├── pyproject.toml
+    ├── uv.lock
+    ├── data/mock/hospitals.json
+    ├── src/siamcare/
+    │   ├── __init__.py
+    │   ├── cli.py                # CLI entry point and error handling
+    │   ├── config.py             # Environment and .env database paths
+    │   ├── composition.py        # Construct repositories and services
+    │   ├── errors.py
+    │   ├── presentation.py       # JSON output
+    │   ├── commands/
+    │   │   ├── __init__.py
+    │   │   ├── actors.py
+    │   │   ├── hospitals.py
+    │   │   ├── referrals.py
+    │   │   └── requests.py
+    │   ├── models/
+    │   │   ├── __init__.py
+    │   │   ├── hospital.py
+    │   │   └── referral.py
+    │   ├── repositories/
+    │   │   ├── __init__.py
+    │   │   ├── hospital_repository.py
+    │   │   ├── json_hospital_repository.py
+    │   │   ├── referral_repository.py
+    │   │   ├── referral_schema.sql
+    │   │   └── sqlite_referral_repository.py
+    │   └── services/
+    │       ├── __init__.py
+    │       ├── hospital_service.py
+    │       └── referral_service.py
+    └── tests/
+        ├── conftest.py
+        ├── test_cli.py
+        ├── test_config.py
+        ├── test_hospital_repository.py
+        ├── test_hospital_service.py
+        ├── test_referral_cli.py
+        ├── test_referral_repository.py
+        └── test_referral_service.py
 ```
 
----
+Models validate records; services enforce workflow rules; repositories handle
+JSON and SQLite storage; command modules handle CLI arguments. Each workflow
+write commits referral state, the changed request, and its event in one transaction.
+The wheel bundles the hospital fixture and SQLite schema.
 
-## Getting started
+Local `.env`, SQLite files, `.venv/`, caches, and `dist/` are generated or private
+files excluded from Git. They are not part of the shared source tree above.
 
-### Prerequisites
+## Current limitations
 
-- An AWS account with Bedrock model access (Claude and multilingual embeddings) in your chosen region
-- Node.js + AWS CDK, Python 3.12, Flutter SDK
-- *(iOS only)* an Apple developer account for TestFlight
-
-> ⚠️ Before you start, check that the models, Bedrock Knowledge Bases and S3 Vectors are available in your chosen region.
-
-### Deploy
-
-```bash
-# 1. Bootstrap CDK (once per account/region)
-cdk bootstrap
-
-# 2. Deploy all stacks in dependency order
-#    auth → data → location → knowledge → agent → workflow → api → notify → observability → hosting → demo
-scripts/deploy.sh demo
-
-# 3. Generate synthetic hospitals, load DynamoDB, upload KB docs, start ingestion
-scripts/seed-demo.sh
-
-# 4. Run safety tests and agent evals before every rehearsal
-#    (tests/safety, tests/agent_evals)
-
-# 5. Restore the starting state before the pitch
-scripts/reset-demo.sh
-
-# 6. Export CDK outputs to the app config, then build
-scripts/export-outputs.sh demo        # writes mobile/env/demo.json
-cd mobile && flutter build apk --dart-define-from-file=env/demo.json
-cd mobile && flutter build web --dart-define-from-file=env/demo.json
-```
-
-### Environments
-
-| Stage | Purpose | Notes |
-|---|---|---|
-| `dev` | Daily building and testing | Capacity simulator on, verbose logs |
-| `demo` | Live pitch | Demo operator, mock hospitals, scenario control, backup mode |
-| `prod` *(future)* | Pilot with a real referral center | No demo stack, real accounts, PDPA review, data integration |
-
-CI/CD: **CodePipeline** (connected to GitHub through CodeConnections) runs `flutter analyze` and the unit, widget and safety tests on every PR. On merge to `main`, it deploys with CDK, builds the APK and web bundle, and runs **Device Farm** tests.
-
----
-
-## Testing
-
-| Layer | What is tested |
-|---|---|
-| **Safety** | Every phrase in `red_flags_en.csv` / `red_flags_th.csv` must trigger the emergency screen, and the safe phrases must not. Runs in CI on every change. |
-| **Permissions** | Every API route is called by every role. Only the allowed roles may succeed. |
-| **Agent evals** | Each scenario runs 10 times. It passes if the agent picks a capable hospital, cites sources, re-plans after a decline and **never approves**. Median time and token use are recorded. |
-| **End-to-end** | Flutter integration tests for every role's main flow in both languages, on real devices in AWS Device Farm |
-
----
-
-## Demo scenarios
-
-| Scenario | What it proves |
-|---|---|
-| 🧠 Suspected stroke, time-critical; the nearest hospital declines (CT down) | Planning, RAG, tool calls, re-planning, human approval |
-| ❤️ STEMI with conflicting capacity data at the nearest hospital | Trust labels, human review of uncertain data |
-| 🤰 Patient types in Thai about pregnancy cramps | Bilingual reply, cross-language RAG, trust labels |
-| 🚨 Patient types "chest pain" in Thai | Emergency screen with 1669 **before any AI call** |
-| 📱 Hospital staff update capacity on a second phone | Live data; the stale label turns fresh |
-| 🛑 Demo operator slows or blocks the Bedrock call | Graceful fallback, no dead end |
-
-The demo ends on the **audit trail** and the measured before/after result: median time to an accepted placement, compared with a simulated phone-call process.
-
----
-
-## Cost efficiency
-
-Everything is **serverless and pay-per-use**, so idle cost is close to zero. The exceptions are the vector store and the map tiles.
-The main costs per referral are model tokens, Lambda invocations, Step Functions transitions and route matrix calls. Using the **small model for patient search** and the **stronger model only for referral planning** keeps token costs down.
-
-Cost tracking: AWS Pricing Calculator estimates, a CloudWatch usage dashboard, and an AWS Budgets alert for the competition month.
-
----
-
-## Scope and constraints
-
-- ⏱️ 14-day build on AWS serverless, kept cost-efficient
-- 🧪 **Synthetic data only**: fictional hospitals at real Bangkok coordinates, with no real hospital agreements and no real patient data
-- 🌐 Bilingual: English and Thai UI, and the agent replies in the user's language
-- 🚫 Out of scope: insurance, EHR/HIS integration, real payments, public app-store release
-
-> **Disclaimer:** CareRelay is a hackathon prototype. It does not provide medical advice, diagnosis or treatment. In an emergency in Thailand, call **1669**.
-
----
+This is a local simulation with recorded capacity snapshots. It has no authenticated
+users, live hospital integrations, reservations, transport dispatch, HTTP endpoints,
+AI agents, or AWS deployment. History is useful for inspecting the workflow but is
+not a tamper-proof audit log. Bed counts do not guarantee admission.
 
 ## License
 

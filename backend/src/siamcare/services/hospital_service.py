@@ -1,8 +1,9 @@
+from siamcare.errors import InvalidInputError, NotFoundError
 from siamcare.models.hospital import Hospital, normalize_specialty
 from siamcare.repositories.hospital_repository import HospitalRepository
 
 
-class HospitalNotFoundError(LookupError):
+class HospitalNotFoundError(NotFoundError):
     """The requested hospital ID does not exist."""
 
 
@@ -27,7 +28,7 @@ class HospitalService:
         if min_free_beds is not None and (
             type(min_free_beds) is not int or min_free_beds < 0
         ):
-            raise ValueError("min_free_beds must be a nonnegative integer")
+            raise InvalidInputError("min_free_beds must be a nonnegative integer")
         specialty = normalize_specialty(specialty)
         return tuple(
             hospital

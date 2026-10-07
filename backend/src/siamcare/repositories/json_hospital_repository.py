@@ -5,10 +5,11 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from siamcare.errors import InvalidInputError
 from siamcare.models.hospital import Hospital
 
 
-class HospitalDataError(ValueError):
+class HospitalDataError(InvalidInputError):
     """A dataset cannot be read or violates the hospital schema."""
 
 
