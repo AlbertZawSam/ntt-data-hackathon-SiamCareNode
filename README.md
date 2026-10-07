@@ -584,7 +584,7 @@ Cost tracking: AWS Pricing Calculator estimates, a CloudWatch usage dashboard, a
 - 🌐 Bilingual: English and Thai UI, and the agent replies in the user's language
 - 🚫 Out of scope: insurance, EHR/HIS integration, real payments, public app-store release
 
-> **Disclaimer:** CareRelay is a hackathon prototype. It does not provide medical advice, diagnosis or treatment. In an emergency in Thailand, call **1669**.
+> **Disclaimer:** SiamCareNode is a hackathon prototype. It does not provide medical advice, diagnosis or treatment. In an emergency in Thailand, call **1669**.
 
 ---
 
